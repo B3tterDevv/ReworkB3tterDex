@@ -150,14 +150,23 @@ local function FireRemote(remote, target)
     end)
 end
 
-
 local function KnifeKill(target)
     if not target then return end
+    local function isAlive(plr)
+        local char = plr.Character
+        if not char or not char.Parent then return false end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        return hum and hum.Health > 0
+    end
     local remotes = GetRemotes()
     if #remotes == 0 then return end
+    local fired = 0
     for _, remote in ipairs(remotes) do
+        if not isAlive(target) then break end
         FireRemote(remote, target)
-        task.wait(0.00003)
+        fired = fired + 1
+        task.wait(0.03)
+        if fired >= 2 then break end
     end
 end
 
@@ -335,8 +344,7 @@ local GunKill = function(target, pos)
         end
     end
 end
-
-
+--[[
 local link = "https://discord.gg/e5EGnteek5"
 local function copy(txt)
     local cb = setclipboard or toclipboard or set_clipboard or (Clipboard and Clipboard.set)
@@ -344,6 +352,7 @@ local function copy(txt)
     return false
 end
 copy(link)
+]]
 
 local function getAbsoluteDevice()
     local info = {Device = "Desktop", IsEmulator = false}
@@ -1051,7 +1060,6 @@ local EspTeamMatesEnabled = GetSetting("EspTeamMatesEnabled", false)
 local AutoGiveCloakEnabled = GetSetting("AutoGiveCloakEnabled", false)
 local CloakSpeed = GetSetting("CloakSpeed", 3)
 local CloakAccel = GetSetting("CloakAccel", 10)
-local AutoGiveFakeLagEnabled = GetSetting("AutoGiveFakeLagEnabled", false)
 local Shoot2DieEnabled = GetSetting("Shoot2DieEnabled", false)
 local Shoot2DieToClick2Die = GetSetting("Shoot2DieToClick2Die", false)
 local AllowSlidingKill = GetSetting("AllowSlidingKill", false)
@@ -1080,7 +1088,6 @@ local CurrentEnemyOptions = {}
 local SlidingSessionActive = false
 local SlidingKills = {}
 local SlidingConnection = nil
-local CloakTool = nil
 local FakeLagTool = nil
 local CurrentGun = nil
 local CurrentKnife = nil
@@ -1672,7 +1679,7 @@ end
 
 local function PerformKnifeKill(target)
     if not target then return end
-    for _ = 1, 8 do
+    for _ = 1, 7 do
         KnifeKill(target)
     end
 end
@@ -1692,13 +1699,13 @@ local function Shoot2Die(ignoreSlide)
     local Tool, KillRemote = GetToolWithKill()
     if KillRemote and Tool and Tool:FindFirstChild("Handle") then
         local direction = (target.Character.HumanoidRootPart.Position - Tool.Handle.Position).Unit
-        for _ = 1, 25 do pcall(function() KillRemote:FireServer(target, direction) end) end
+        for _ = 1, 5 do pcall(function() KillRemote:FireServer(target, direction) end) end
     end
     local Eq, GunTool = HasWeaponEquipped()
     if not Eq and AutoEquipEnabled then GunTool = EquipGun() end
     if GunTool then
         local pos = GetPredictedPosition(target)
-        if pos then for _ = 1, 15 do Shoot(target, pos) end end
+        if pos then for _ = 1, 5 do Shoot(target, pos) end end
     end
     if not ignoreSlide then
         Rayfield:Notify({Title = lang.Shoot2DieTitle, Content = string.format(lang.Shoot2DieContent, target.Name), Duration = 2, Image = "target"})
@@ -1863,11 +1870,6 @@ local function CreateFakePart(realHRP)
     return FakePart
 end
 
-local POS1 = CFrame.new(-310, 69, 7)
-local POS2 = CFrame.new(5e8, 5e8, 5e8)
-local TWEEN_SPEED = 9e9
-local ActiveTween = nil
-
 local function CreateFakePart(realHRP)
     local FakePart = Instance.new("Part")
     FakePart.Size = realHRP.Size
@@ -1881,138 +1883,6 @@ local function CreateFakePart(realHRP)
     FakePart.CFrame = realHRP.CFrame
     FakePart.Parent = Camera
     return FakePart
-end
-
-local function TweenToFar(rootPart)
-    if ActiveTween then
-        ActiveTween:Cancel()
-        ActiveTween = nil
-    end
-    if not rootPart or not rootPart.Parent then return end
-    rootPart.Anchored = true
-    rootPart.CanCollide = false
-    rootPart.CanTouch = false
-    rootPart.CanQuery = false
-    rootPart.Massless = true
-    rootPart.Velocity = Vector3.zero
-    rootPart.RotVelocity = Vector3.zero
-
-    local function tweenTo(targetCF, waitTime)
-        if not rootPart.Parent then return false end
-        if waitTime > 0 then task.wait(waitTime) end
-        if not rootPart.Parent then return false end
-        local distance = (rootPart.Position - targetCF.Position).Magnitude
-        local duration = distance / TWEEN_SPEED
-        if duration <= 0 then duration = 0.01 end
-        local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
-        local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = targetCF})
-        ActiveTween = tween
-        tween:Play()
-        local completed = tween.Completed:Wait()
-        ActiveTween = nil
-        return completed ~= Enum.TweenStatus.Cancelled
-    end
-
-    tweenTo(POS1, 0)
-    tweenTo(POS2, 2.8)
-end
-
-local function GiveCloak()
-    if CloakTool and CloakTool.Parent and CloakTool:IsDescendantOf(LocalPlayer) then
-        Rayfield:Notify({Title = "Cloak", Content = lang.AlreadyHaveCloak, Duration = 2})
-        return
-    end
-    local Tool = Instance.new("Tool")
-    Tool.Name = "B3tterDex Invisibility Cloak"
-    Tool.RequiresHandle = false
-    Tool.Parent = LocalPlayer.Backpack
-    CloakTool = Tool
-    local Active = false
-    local RealHRP, FakeHRP, Humanoid, Loop, deathConn
-    local Velocity = Vector3.zero
-    local SPEED = CloakSpeed
-    local ACCEL = CloakAccel
-
-    local function EndCloak(teleportToFake)
-        if Loop then Loop:Disconnect() end
-        if deathConn then deathConn:Disconnect() end
-        if ActiveTween then
-            ActiveTween:Cancel()
-            ActiveTween = nil
-        end
-        if Humanoid then
-            Camera.CameraSubject = Humanoid
-        end
-        if RealHRP and FakeHRP then
-            for _, child in ipairs(RealHRP:GetChildren()) do
-                if child:IsA("BodyVelocity") or child:IsA("BodyGyro") or child:IsA("AlignPosition") or child:IsA("Attachment") then
-                    child:Destroy()
-                end
-            end
-            if teleportToFake then
-                RealHRP.CFrame = FakeHRP.CFrame
-                RealHRP.AssemblyLinearVelocity = Vector3.zero
-                RealHRP.AssemblyAngularVelocity = Vector3.zero
-            end
-            RealHRP.Anchored = false
-            RealHRP.CanCollide = true
-        end
-        if FakeHRP then FakeHRP:Destroy() end
-        Active = false
-    end
-
-    Tool.Equipped:Connect(function()
-        if Active then return end
-        Active = true
-        local Character = LocalPlayer.Character
-        if not Character then return end
-        Humanoid = Character:FindFirstChildOfClass("Humanoid")
-        RealHRP = Character:FindFirstChild("HumanoidRootPart")
-        if not Humanoid or not RealHRP then return end
-
-        deathConn = Humanoid.Died:Connect(function()
-            if Tool and Tool.Parent then
-                Tool.Parent = nil
-            end
-            EndCloak(true)
-        end)
-
-        FakeHRP = CreateFakePart(RealHRP)
-
-        for _, c in ipairs(RealHRP:GetChildren()) do
-            if c:IsA("BodyVelocity") or c:IsA("BodyGyro") or c:IsA("AlignPosition") or c:IsA("Attachment") then
-                c:Destroy()
-            end
-        end
-
-        TweenToFar(RealHRP)
-
-        Camera.CameraSubject = FakeHRP
-
-        Loop = RunService.RenderStepped:Connect(function(dt)
-            if not Active then return end
-            local cam = Camera.CFrame
-            local look = cam.LookVector
-            local right = cam.RightVector
-            local up = cam.UpVector
-            local move = Control:GetMoveVector()
-            local dir = Vector3.zero
-            if move.Z < 0 then dir += look elseif move.Z > 0 then dir -= look end
-            if move.X > 0 then dir += right elseif move.X < 0 then dir -= right end
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += up end
-            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir -= up end
-            local targetVelocity = dir.Magnitude > 0 and dir.Unit * SPEED or Vector3.zero
-            Velocity = Velocity:Lerp(targetVelocity, math.clamp(dt * ACCEL, 0, 1))
-            local targetPos = FakeHRP.Position + Velocity
-            FakeHRP.CFrame = FakeHRP.CFrame:Lerp(CFrame.new(targetPos, targetPos + cam.LookVector), math.clamp(dt * 6, 0, 1))
-        end)
-    end)
-
-    Tool.Unequipped:Connect(function()
-        EndCloak(true)
-    end)
-
-    Rayfield:Notify({Title = "Cloak", Content = lang.GiveCloak, Duration = 2})
 end
 
 local function GiveFakeLag()
@@ -2073,16 +1943,6 @@ local function GiveFakeLag()
         if FakeHRP_2 then FakeHRP_2:Destroy() end
     end)
     Rayfield:Notify({Title = "Fake Lag", Content = lang.GiveFakeLag, Duration = 2})
-end
-
-local function RemoveCloakToolFunc()
-    if CloakTool then
-        pcall(function() CloakTool:Destroy() end)
-        CloakTool = nil
-        Rayfield:Notify({Title = "Cloak", Content = lang.CloakRemoved, Duration = 2})
-    else
-        Rayfield:Notify({Title = "Cloak", Content = lang.NoCloakFound, Duration = 2})
-    end
 end
 
 local function RemoveFakeLagToolFunc()
@@ -2543,7 +2403,6 @@ KillTab:CreateToggle({
 })
 
 local InventoryTab = Window:CreateTab(lang.InventoryTab)
-InventoryTab:CreateLabel(lang.CloakLabel)
 InventoryTab:CreateSlider({
     Name = lang.CloakAccel,
     Range = {1, 80}, Increment = 1, Suffix = "", CurrentValue = CloakAccel,
@@ -2553,13 +2412,6 @@ InventoryTab:CreateSlider({
     Name = lang.CloakSpeed,
     Range = {1, 100}, Increment = 1, Suffix = "", CurrentValue = CloakSpeed,
     Callback = function(Value) CloakSpeed = Value UpdateSetting("CloakSpeed", Value) end
-})
-InventoryTab:CreateButton({Name = lang.GiveCloak, Callback = GiveCloak})
-InventoryTab:CreateButton({Name = lang.RemoveCloak, Callback = RemoveCloakToolFunc})
-InventoryTab:CreateToggle({
-    Name = lang.AutoCloak,
-    CurrentValue = AutoGiveCloakEnabled,
-    Callback = function(Value) AutoGiveCloakEnabled = Value UpdateSetting("AutoGiveCloakEnabled", Value) end
 })
 InventoryTab:CreateLabel(lang.FakeLagLabel)
 InventoryTab:CreateLabel(lang.FakeLagDesc)
