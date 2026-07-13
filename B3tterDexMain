@@ -1,4 +1,4 @@
--- B3tterDex 2.7
+-- B3tterDex 2.9
 -- B3tterDex by @Sty! & @mrholvis
 --[[
  A little of history...
@@ -165,7 +165,7 @@ local function KnifeKill(target)
         if not isAlive(target) then break end
         FireRemote(remote, target)
         fired = fired + 1
-        task.wait(0.03)
+        task.wait(0.05)
         if fired >= 4 then break end
     end
 end
@@ -1347,6 +1347,85 @@ local function IfISeeTarget(Player)
     return false
 end
 
+local ThrowKill = function(target, pos, origin, kill)
+    if not target then return end
+    kill = kill or false
+    local function isAlive(plr)
+        local char = plr.Character
+        if not char or not char.Parent then return false end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        return hum and hum.Health > 0
+    end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local knife = nil
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") and tool:FindFirstChild("Handle") and tool:FindFirstChild("Throw") then
+            knife = tool
+            break
+        end
+    end
+    if not knife then
+        local backpack = LocalPlayer:FindFirstChild("Backpack")
+        if backpack then
+            for _, tool in ipairs(backpack:GetChildren()) do
+                if tool:IsA("Tool") and tool:FindFirstChild("Handle") and tool:FindFirstChild("Throw") then
+                    local hum = char:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        pcall(function() hum:EquipTool(tool) end)
+                        task.wait(0.1)
+                        if tool.Parent == char then knife = tool break end
+                    end
+                end
+            end
+        end
+    end
+    if not knife then return end
+    local handle = knife:FindFirstChild("Handle")
+    if not handle then return end
+    local animator = char:FindFirstChildOfClass("Humanoid") and char.Humanoid:FindFirstChildOfClass("Animator")
+    if animator then
+        local animFolder = knife:FindFirstChild("Animations")
+        if animFolder then
+            local chargeAnim = animFolder:FindFirstChild("ThrowCharge")
+            local throwAnim = animFolder:FindFirstChild("Throw")
+            if chargeAnim and throwAnim then
+                local t1 = animator:LoadAnimation(Instance.new("Animation", {AnimationId = chargeAnim.AnimationId}))
+                local t2 = animator:LoadAnimation(Instance.new("Animation", {AnimationId = throwAnim.AnimationId}))
+                t1:Play()
+                t1.Stopped:Wait()
+                t2:Play()
+                t2.Stopped:Wait()
+            end
+        end
+    end
+    local predictedPos = pos
+    if not predictedPos or predictedPos == Vector3.new(0,0,0) then
+        predictedPos = GetPredictedPosition(target) or (target.Character and target.Character:FindFirstChild("HumanoidRootPart") and target.Character.HumanoidRootPart.Position)
+    end
+    if not predictedPos then return end
+    local originPos = origin or handle.Position
+    local uuid = "7b947725-1f4b-46a9-a54a-cfefb1a269d2"
+    local cframe = CFrame.new(predictedPos)
+    local remotes = {}
+    for _, child in ipairs(Net:GetChildren()) do
+        if child:IsA("RemoteEvent") and string.sub(child.Name, 1, 3) == "RE/" then
+            remotes[#remotes + 1] = child
+        end
+    end
+    if #remotes == 0 then return end
+    for _, remote in ipairs(remotes) do
+        if not isAlive(target) then break end
+        pcall(function()
+            remote:FireServer(uuid, cframe, originPos)
+        end)
+        task.wait(0.05)
+    end
+    if kill and isAlive(target) then
+        KnifeKill(target)
+    end
+end
+
 local function GetClosestPlayer()
     local char = LocalPlayer.Character
     if not char then return nil end
@@ -1955,49 +2034,6 @@ local function RemoveFakeLagToolFunc()
     end
 end
 
-local function throwKnifeAt(target)
-    if not target or not target.Character then return false end
-    local targetHrp = target.Character:FindFirstChild("HumanoidRootPart")
-    if not targetHrp then return false end
-
-    local weapon, remote, handle = getEquippedKnife()
-    if not remote or not handle then return false end
-
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return false end
-    local hrpPos = char.HumanoidRootPart.Position
-    local handlePos = handle.Position
-
-    local predictedPos = GetPredictedPosition(target)
-    if not predictedPos then return false end
-
-    local lineDir = (predictedPos - hrpPos).Unit
-    local handleOffset = handlePos - hrpPos
-    local projDistance = handleOffset:Dot(lineDir)
-    local correctedOrigin = hrpPos + projDistance * lineDir
-
-    local throwCFrame = CFrame.lookAt(correctedOrigin, predictedPos)
-    pcall(function()
-        remote:FireServer(throwCFrame, predictedPos)
-    end)
-    return true
-end
-
-local function tryKnifeKillFallback(target)
-    if not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then return false end
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return false end
-    local dist = (target.Character.HumanoidRootPart.Position - char.HumanoidRootPart.Position).Magnitude
-    if dist > knifeDetectionDist then return false end
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Blacklist
-    params.FilterDescendantsInstances = {char}
-    local ray = workspace:Raycast(char.HumanoidRootPart.Position, (target.Character.HumanoidRootPart.Position - char.HumanoidRootPart.Position).Unit * dist, params)
-    if ray and not ray.Instance:IsDescendantOf(target.Character) then return false end
-    if KnifeKill then pcall(function() KnifeKill:FireServer(target, target) end) return true end
-    return false
-end
-
 local function getClosestVisibleEnemyForKnife()
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
@@ -2031,20 +2067,11 @@ local function FastThrowKnife()
         if autoUnequipKnife then UnequipKnife() end
         return
     end
-    local success = throwKnifeAt(target)
-    if success then
-        tryKnifeKillFallback(target)
-        if autoUnequipKnife then
-            task.defer(function()
-                UnequipKnife()
-            end)
-        end
-    else
-        if autoUnequipKnife then
-            task.defer(function()
-                UnequipKnife()
-            end)
-        end
+    ThrowKill(target, nil, nil, true)
+    if autoUnequipKnife then
+        task.defer(function()
+            UnequipKnife()
+        end)
     end
 end
 
@@ -2501,7 +2528,149 @@ local OpenButtonTab = Window:CreateTab(lang.OpenButtonTab)
 OpenButtonTab:CreateLabel(lang.HideOpenLabel)
 OpenButtonTab:CreateButton({Name = lang.HideBtn, Callback = hideOpenButton})
 OpenButtonTab:CreateButton({Name = lang.ShowBtn, Callback = showOpenButton})
+local OpenButtonShowText = GetSetting("OpenButtonShowText", true)
 
+wordsToConvert.English.HideTextBtn = "Hide Text"
+wordsToConvert.English.ShowTextBtn = "Show Text"
+wordsToConvert.English.HideBackgroundBtn = "Hide Background"
+wordsToConvert.English.ShowBackgroundBtn = "Show Background"
+
+wordsToConvert.Spanish.HideTextBtn = "Ocultar Texto"
+wordsToConvert.Spanish.ShowTextBtn = "Mostrar Texto"
+wordsToConvert.Spanish.HideBackgroundBtn = "Ocultar Fondo"
+wordsToConvert.Spanish.ShowBackgroundBtn = "Mostrar Fondo"
+
+wordsToConvert.German.HideTextBtn = "Text ausblenden"
+wordsToConvert.German.ShowTextBtn = "Text einblenden"
+wordsToConvert.German.HideBackgroundBtn = "Hintergrund ausblenden"
+wordsToConvert.German.ShowBackgroundBtn = "Hintergrund einblenden"
+
+wordsToConvert.French.HideTextBtn = "Masquer le texte"
+wordsToConvert.French.ShowTextBtn = "Afficher le texte"
+wordsToConvert.French.HideBackgroundBtn = "Masquer le fond"
+wordsToConvert.French.ShowBackgroundBtn = "Afficher le fond"
+
+wordsToConvert.Portuguese.HideTextBtn = "Ocultar Texto"
+wordsToConvert.Portuguese.ShowTextBtn = "Mostrar Texto"
+wordsToConvert.Portuguese.HideBackgroundBtn = "Ocultar Fundo"
+wordsToConvert.Portuguese.ShowBackgroundBtn = "Mostrar Fundo"
+
+wordsToConvert.English.MakePromptSquareBtn = "Make Prompt Square"
+wordsToConvert.English.RestorePromptCornersBtn = "Bring Back Prompt With Corners"
+
+wordsToConvert.Spanish.MakePromptSquareBtn = "Hacer Prompt Cuadrado"
+wordsToConvert.Spanish.RestorePromptCornersBtn = "Devolver Esquinas al Prompt"
+
+wordsToConvert.German.MakePromptSquareBtn = "Prompt quadratisch machen"
+wordsToConvert.German.RestorePromptCornersBtn = "Prompt-Ecken wiederherstellen"
+
+wordsToConvert.French.MakePromptSquareBtn = "Rendre le Prompt carré"
+wordsToConvert.French.RestorePromptCornersBtn = "Remettre les coins du Prompt"
+
+wordsToConvert.Portuguese.MakePromptSquareBtn = "Deixar Prompt Quadrado"
+wordsToConvert.Portuguese.RestorePromptCornersBtn = "Restaurar Cantos do Prompt"
+
+local prompt, title, corner = nil, nil, nil
+
+local function capturePrompt()
+	local coreGui = cloneref(game:GetService("CoreGui"))
+	local rayfield = coreGui:FindFirstChild("Rayfield", true)
+	if not rayfield then
+		return false
+	end
+
+	prompt = rayfield:FindFirstChild("Prompt", true)
+	if not prompt then
+		return false
+	end
+
+	title = prompt:FindFirstChild("Title", true)
+	corner = prompt:FindFirstChildWhichIsA("UICorner", true)
+
+	return prompt ~= nil
+end
+
+local function updateTextVisibility(state)
+	OpenButtonShowText = state
+	UpdateSetting("OpenButtonShowText", state)
+
+	if not capturePrompt() then
+		return
+	end
+
+	title.Visible = state
+end
+
+
+OpenButtonTab:CreateButton({
+	Name = lang.HideTextBtn,
+	Callback = function()
+		updateTextVisibility(false)
+	end
+})
+
+OpenButtonTab:CreateButton({
+	Name = lang.ShowTextBtn,
+	Callback = function()
+		updateTextVisibility(true)
+	end
+})
+
+local PromptSquare = GetSetting("PromptSquare", false)
+
+local PromptCornerRadius
+
+local function setPromptCorners(square)
+	if not prompt then
+		if not capturePrompt() then
+			return
+		end
+	end
+
+	local corner = prompt:FindFirstChildOfClass("UICorner")
+	if not corner then
+		return
+	end
+
+	if not PromptCornerRadius then
+		PromptCornerRadius = corner.CornerRadius
+	end
+
+	if square then
+		corner.CornerRadius = UDim.new(0, 0)
+	else
+		corner.CornerRadius = PromptCornerRadius
+	end
+end
+
+OpenButtonTab:CreateButton({
+	Name = lang.MakePromptSquareBtn,
+	Callback = function()
+		PromptSquare = true
+		UpdateSetting("PromptSquare", true)
+
+		setPromptCorners(true)
+	end
+})
+
+OpenButtonTab:CreateButton({
+	Name = lang.RestorePromptCornersBtn,
+	Callback = function()
+		PromptSquare = false
+		UpdateSetting("PromptSquare", false)
+
+		setPromptCorners(false)
+	end
+})
+
+task.spawn(function()
+	repeat
+		task.wait(0.2)
+	until capturePrompt()
+
+	updateTextVisibility(OpenButtonShowText)
+	updateBackgroundVisibility(OpenButtonShowBackground)
+end)
 OpenButtonTab:CreateLabel(lang.OpenButtonCustomLabel)
 
 local savedButtonText = GetSetting("OpenButtonText", "Show B3tterDex")
@@ -2515,28 +2684,6 @@ local function parseColor(str, default)
     if r and g and b then return Color3.fromRGB(tonumber(r), tonumber(g), tonumber(b)) end
     return default
 end
-
-local prompt, title, corner = nil, nil, nil
-
-local function capturePrompt()
-    local coreGui = cloneref(game:GetService("CoreGui"))
-    local rayfield = coreGui:FindFirstChild("Rayfield", true)
-    if rayfield then
-        prompt = rayfield:FindFirstChild("Prompt")
-        if prompt then
-            title = prompt:FindFirstChild("Title")
-            corner = prompt:FindFirstChildOfClass("UICorner")
-            return true
-        end
-    end
-    return false
-end
-
-task.spawn(function()
-    while not capturePrompt() do
-        task.wait(0.1)
-    end
-end)
 
 local function adjustStyle(newText)
     if not prompt or not title then return end
@@ -2653,7 +2800,6 @@ task.spawn(function()
 end)
 
 LocalPlayer.CharacterAdded:Connect(function()
-    if AutoGiveCloakEnabled then task.wait(0.5) GiveCloak() end
     if AutoGiveFakeLagEnabled then task.wait(0.5) GiveFakeLag() end
     CurrentGun = nil
     CurrentKnife = nil
