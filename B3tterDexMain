@@ -24,9 +24,13 @@ Why i got angry and think a masterpice?
 Thinking i found the perfect name 
 B3tterDex.
 ]]
+
 --[[
 If you found this repo somehow PLEASE dont use loadstring(game:HttpGet("this repo"))()
 Its UNSAFE for you,for duels not detecting you use this alt
+
+-- B3tterDex tuff script
+
 local Safe_Request = (syn and syn.request) or (http and http.request) or http_request or request
 
 local function SafeHttpGet(url, retries)
