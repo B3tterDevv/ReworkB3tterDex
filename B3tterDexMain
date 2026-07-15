@@ -1,4 +1,4 @@
--- B3tterDex 2.9
+-- B3tterDex 3.0 - The Cutest,fast,clean and user friendly Murderers Vs Sheriffs Script [UwU]
 -- B3tterDex by @Sty! & @mrholvis
 --[[
  A little of history...
@@ -23,8 +23,6 @@ Why i got angry and think a masterpice?
 Thinking i found the perfect name
 B3tterDex.
 ]]
--- Then... B3tterDex Revived,Thanks To DanHub. (Downtime 6 months btw)
--- MrHolvis Left the Team. For Respect i wil still adding him.
 
 if not getgenv then getgenv = function() return _G end end
 
@@ -144,13 +142,29 @@ local function GetRemotes()
     return remoteCache
 end
 
-local function FireRemote(remote, target)
+local function FireRemote(remote, target, isSpam)
     pcall(function()
         remote:FireServer("bb15e94b-1af0-48fe-be2b-b2f9e007565a", target)
     end)
+    
+    if DebugMode then
+        local char = target.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local killed = not (hum and hum.Health > 0)
+        local title = isSpam and lang.DebugKillSpamTitle or lang.DebugKnifeKillTitle
+        Rayfield:Notify({
+            Title = title,
+            Content = string.format("%s\n%s\n%s",
+                string.format(lang.DebugTriedKill, target and target.Name or "Unknown"),
+                string.format(lang.DebugRemoteUsed, remote and remote.Name or "Unknown"),
+                string.format(lang.DebugKilledUsingRE, killed and "true" or "false")
+            ),
+            Duration = 3
+        })
+    end
 end
 
-local function KnifeKill(target)
+local function KnifeKill(target, isSpam)
     if not target then return end
     local function isAlive(plr)
         local char = plr.Character
@@ -161,12 +175,30 @@ local function KnifeKill(target)
     local remotes = GetRemotes()
     if #remotes == 0 then return end
     local fired = 0
+    local remoteUsed = nil
     for _, remote in ipairs(remotes) do
         if not isAlive(target) then break end
-        FireRemote(remote, target)
+        remoteUsed = remote.Name
+        FireRemote(remote, target,isSpam)
         fired = fired + 1
         task.wait(0.05)
         if fired >= 4 then break end
+    end
+    
+    if DebugMode then
+        local char = target.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local killed = not (hum and hum.Health > 0)
+        local title = isSpam and lang.DebugKillSpamTitle or lang.DebugKnifeKillTitle
+        Rayfield:Notify({
+            Title = title,
+            Content = string.format("%s\n%s\n%s",
+                string.format(lang.DebugTriedKill, target and target.Name or "Unknown"),
+                string.format(lang.DebugRemoteUsed, remoteUsed or "Unknown"),
+                string.format(lang.DebugKilledUsingRE, killed and "true" or "false")
+            ),
+            Duration = 3
+        })
     end
 end
 
@@ -203,7 +235,7 @@ local KillAll = function(enabled)
                             task.spawn(function()
                                 for _, remote in ipairs(remotes) do
                                     if not getgenv()._killAllActive then break end
-                                    FireRemote(remote, enemy)
+                                    FireRemote(remote, enemy, true)
                                 end
                             end)
                         end
@@ -232,12 +264,11 @@ local lastGunChosen = nil
 local workingGunRemotes = {}
 local knownBadGunRemotes = {}
 
-local GunKill = function(target, pos)
+local function GunKill(target, pos, isSpam)
     if not target then return end
     pos = pos or Vector3.new(0, 0, 0)
     
     local remotes = {}
-    
     for _, child in ipairs(Net:GetChildren()) do
         if child:IsA("RemoteEvent") and string.find(child.Name, "^RE/") then
             local lower = string.lower(child.Name)
@@ -262,8 +293,10 @@ local GunKill = function(target, pos)
         return hum and hum.Health > 0
     end
     
+    local remoteUsed = nil
     if #workingGunRemotes > 0 then
         for _, remote in ipairs(workingGunRemotes) do
+            remoteUsed = remote.Name
             local GunKill_args = {
                 "9576996e-66e6-4d56-b791-f3b062eb597c",
                 target,
@@ -279,71 +312,88 @@ local GunKill = function(target, pos)
                 end
                 table.insert(GunKillRE[target.Name], remote.Name)
                 lastGunChosen = remote
-                return
-            end
-        end
-        return
-    end
-    
-    local used = {}
-    local maxAttempts = #remotes * 2
-    local attempt = 0
-    
-    while isAlive(target) and attempt < maxAttempts do
-        local available = {}
-        for _, r in ipairs(remotes) do
-            if not used[r] then
-                available[#available + 1] = r
-            end
-        end
-        
-        if #available == 0 then
-            for _, r in ipairs(remotes) do
-                used[r] = nil
-            end
-            for _, r in ipairs(remotes) do
-                available[#available + 1] = r
-            end
-        end
-        
-        lastGunChosen = available[math.random(1, #available)]
-        used[lastGunChosen] = true
-        attempt = attempt + 1
-        
-        local GunKill_args = {
-            "9576996e-66e6-4d56-b791-f3b062eb597c",
-            target,
-            pos
-        }
-        
-        local success, err = pcall(function()
-            lastGunChosen:FireServer(unpack(GunKill_args))
-        end)
-        
-        if not success then
-            knownBadGunRemotes[#knownBadGunRemotes + 1] = lastGunChosen
-            for i, r in ipairs(remotes) do
-                if r == lastGunChosen then
-                    table.remove(remotes, i)
-                    break
-                end
-            end
-            task.wait(1.2)
-        else
-            task.wait(1.3)
-            if not isAlive(target) then
-                if not GunKillRE[target.Name] then
-                    GunKillRE[target.Name] = {}
-                end
-                table.insert(GunKillRE[target.Name], lastGunChosen.Name)
-                if not table.find(workingGunRemotes, lastGunChosen) then
-                    workingGunRemotes[#workingGunRemotes + 1] = lastGunChosen
-                end
                 break
             end
         end
+    else
+        local used = {}
+        local maxAttempts = #remotes * 2
+        local attempt = 0
+        
+        while isAlive(target) and attempt < maxAttempts do
+            local available = {}
+            for _, r in ipairs(remotes) do
+                if not used[r] then
+                    available[#available + 1] = r
+                end
+            end
+            
+            if #available == 0 then
+                for _, r in ipairs(remotes) do
+                    used[r] = nil
+                end
+                for _, r in ipairs(remotes) do
+                    available[#available + 1] = r
+                end
+            end
+            
+            lastGunChosen = available[math.random(1, #available)]
+            remoteUsed = lastGunChosen.Name
+            used[lastGunChosen] = true
+            attempt = attempt + 1
+            
+            local GunKill_args = {
+                "9576996e-66e6-4d56-b791-f3b062eb597c",
+                target,
+                pos
+            }
+            
+            local success, err = pcall(function()
+                lastGunChosen:FireServer(unpack(GunKill_args))
+            end)
+            
+            if not success then
+                knownBadGunRemotes[#knownBadGunRemotes + 1] = lastGunChosen
+                for i, r in ipairs(remotes) do
+                    if r == lastGunChosen then
+                        table.remove(remotes, i)
+                        break
+                    end
+                end
+                task.wait(1.2)
+            else
+                task.wait(1.3)
+                if not isAlive(target) then
+                    if not GunKillRE[target.Name] then
+                        GunKillRE[target.Name] = {}
+                    end
+                    table.insert(GunKillRE[target.Name], lastGunChosen.Name)
+                    if not table.find(workingGunRemotes, lastGunChosen) then
+                        workingGunRemotes[#workingGunRemotes + 1] = lastGunChosen
+                    end
+                    break
+                end
+            end
+        end
+    end
+    
+    if DebugMode then
+        local char = target.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local killed = not (hum and hum.Health > 0)
+        local title = isSpam and lang.DebugKillSpamTitle or lang.DebugGunKillTitle
+        Rayfield:Notify({
+            Title = title,
+            Content = string.format("%s\n%s\n%s",
+                string.format(lang.DebugTriedKill, target and target.Name or "Unknown"),
+                string.format(lang.DebugRemoteUsed, remoteUsed or "Unknown"),
+                string.format(lang.DebugKilledUsingRE, killed and "true" or "false")
+            ),
+            Duration = 3
+        })
     end
 end
+
 --[[
 local link = "https://discord.gg/e5EGnteek5"
 local function copy(txt)
@@ -978,10 +1028,118 @@ wordsToConvert.French["SetBackgroundColorToggleName"] = "Définir la couleur de 
 wordsToConvert.Portuguese["SetTitleColorToggleName"] = "Definir cor do título selecionada"
 wordsToConvert.Portuguese["SetBackgroundColorToggleName"] = "Definir cor do fundo selecionada"
 
+wordsToConvert.English.DebugMode = "Debug Mode"
+wordsToConvert.English.DebugModeTitle = "Debug Mode Shooting"
+wordsToConvert.English.DebugTriedShoot = "Tried to Shoot to: %s"
+wordsToConvert.English.DebugPosition = "Position: %s"
+wordsToConvert.English.DebugKilled = "Killed?: %s"
+wordsToConvert.English.DebugShootMethod = "Shoot Method: %s"
+wordsToConvert.English.DebugUsedBeam = "Used Beam: %s"
+wordsToConvert.English.DebugUsedShowBeam = "Used showBeam: %s"
+wordsToConvert.English.DebugTriedKill = "Tried to Kill: %s"
+wordsToConvert.English.DebugRemoteUsed = "RemoteEvent Used: %s"
+wordsToConvert.English.DebugKilledUsingRE = "Killed using RE?: %s"
+wordsToConvert.English.DebugKnifeKillTitle = "Debug Mode KnifeKill"
+wordsToConvert.English.DebugGunKillTitle = "Debug Mode GunKill"
+wordsToConvert.English.DebugKillSpamTitle = "Debug Mode Kill Spam"
+wordsToConvert.Spanish.DebugMode = "Modo Depuración"
+wordsToConvert.Spanish.DebugModeTitle = "Disparo en Modo Depuración"
+wordsToConvert.Spanish.DebugTriedShoot = "Intento de disparo a: %s"
+wordsToConvert.Spanish.DebugPosition = "Posición: %s"
+wordsToConvert.Spanish.DebugKilled = "¿Mató?: %s"
+wordsToConvert.Spanish.DebugShootMethod = "Método de disparo: %s"
+wordsToConvert.Spanish.DebugUsedBeam = "Beam usado: %s"
+wordsToConvert.Spanish.DebugUsedShowBeam = "showBeam usado: %s"
+wordsToConvert.Spanish.DebugTriedKill = "Intento de matar a: %s"
+wordsToConvert.Spanish.DebugRemoteUsed = "RemoteEvent usado: %s"
+wordsToConvert.Spanish.DebugKilledUsingRE = "¿Mató usando RE?: %s"
+wordsToConvert.Spanish.DebugKnifeKillTitle = "Modo Depuración Cuchillo"
+wordsToConvert.Spanish.DebugGunKillTitle = "Modo Depuración Arma"
+wordsToConvert.Spanish.DebugKillSpamTitle = "Modo Depuración Matanza"
+wordsToConvert.German.DebugMode = "Debug-Modus"
+wordsToConvert.German.DebugModeTitle = "Debug-Modus Schießen"
+wordsToConvert.German.DebugTriedShoot = "Versuch zu schießen auf: %s"
+wordsToConvert.German.DebugPosition = "Position: %s"
+wordsToConvert.German.DebugKilled = "Getötet?: %s"
+wordsToConvert.German.DebugShootMethod = "Schussmethode: %s"
+wordsToConvert.German.DebugUsedBeam = "Beam verwendet: %s"
+wordsToConvert.German.DebugUsedShowBeam = "showBeam verwendet: %s"
+wordsToConvert.German.DebugTriedKill = "Versuch zu töten: %s"
+wordsToConvert.German.DebugRemoteUsed = "Verwendetes RemoteEvent: %s"
+wordsToConvert.German.DebugKilledUsingRE = "Mit RE getötet?: %s"
+wordsToConvert.German.DebugKnifeKillTitle = "Debug-Modus Messer"
+wordsToConvert.German.DebugGunKillTitle = "Debug-Modus Waffe"
+wordsToConvert.German.DebugKillSpamTitle = "Debug-Modus Kill-Spam"
+wordsToConvert.French.DebugMode = "Mode Débogage"
+wordsToConvert.French.DebugModeTitle = "Tir en Mode Débogage"
+wordsToConvert.French.DebugTriedShoot = "Tentative de tir sur: %s"
+wordsToConvert.French.DebugPosition = "Position: %s"
+wordsToConvert.French.DebugKilled = "Tué?: %s"
+wordsToConvert.French.DebugShootMethod = "Méthode de tir: %s"
+wordsToConvert.French.DebugUsedBeam = "Beam utilisé: %s"
+wordsToConvert.French.DebugUsedShowBeam = "showBeam utilisé: %s"
+wordsToConvert.French.DebugTriedKill = "Tentative de tuer: %s"
+wordsToConvert.French.DebugRemoteUsed = "RemoteEvent utilisé: %s"
+wordsToConvert.French.DebugKilledUsingRE = "Tué avec RE?: %s"
+wordsToConvert.French.DebugKnifeKillTitle = "Mode Débogage Couteau"
+wordsToConvert.French.DebugGunKillTitle = "Mode Débogage Arme"
+wordsToConvert.French.DebugKillSpamTitle = "Mode Débogage Kill Spam"
+wordsToConvert.Portuguese.DebugMode = "Modo Depuração"
+wordsToConvert.Portuguese.DebugModeTitle = "Tiro em Modo Depuração"
+wordsToConvert.Portuguese.DebugTriedShoot = "Tentativa de tiro em: %s"
+wordsToConvert.Portuguese.DebugPosition = "Posição: %s"
+wordsToConvert.Portuguese.DebugKilled = "Matou?: %s"
+wordsToConvert.Portuguese.DebugShootMethod = "Método de tiro: %s"
+wordsToConvert.Portuguese.DebugUsedBeam = "Beam usado: %s"
+wordsToConvert.Portuguese.DebugUsedShowBeam = "showBeam usado: %s"
+wordsToConvert.Portuguese.DebugTriedKill = "Tentativa de matar: %s"
+wordsToConvert.Portuguese.DebugRemoteUsed = "RemoteEvent usado: %s"
+wordsToConvert.Portuguese.DebugKilledUsingRE = "Matou usando RE?: %s"
+wordsToConvert.Portuguese.DebugKnifeKillTitle = "Modo Depuração Faca"
+wordsToConvert.Portuguese.DebugGunKillTitle = "Modo Depuração Arma"
+wordsToConvert.Portuguese.DebugKillSpamTitle = "Modo Depuração Matança"
+
 local Language = GetSetting("Language", "English")
 local lang = wordsToConvert[Language] or wordsToConvert.English
 
-local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+local _game =
+    (cloneref and cloneref(game))
+    or (getrenv and getrenv().game)
+    or game
+
+local SafeHttpGet = function(url, retries)
+    retries = retries or 2
+
+    if type(url) ~= "string" then
+        return nil
+    end
+
+    if not url:match("^https?://") then
+        return nil
+    end
+
+    local function request()
+        return _game:HttpGet(url)
+    end
+
+    for i = 1, retries do
+        local ok, res = xpcall(request, function()
+            return nil
+        end)
+
+        if ok and res then
+            return res
+        end
+
+        task.wait(0.3 * i)
+    end
+
+    return nil
+end
+
+local RayfieldSrc = "https://sirius.menu/rayfield"
+
+local Rayfield = loadstring(SafeHttpGet(RayfieldSrc))()
 local Window = Rayfield:CreateWindow({
     Name = lang.WindowName,
     LoadingTitle = lang.LoadingTitle,
@@ -1046,6 +1204,7 @@ end
 
 local BodyParts = {"Head","UpperTorso","LowerTorso","Torso","HumanoidRootPart","Left Arm","Right Arm","Left Leg","Right Leg"}
 
+local DebugMode = GetSetting("DebugMode", false)
 local AimDistance = GetSetting("AimDistance", 500)
 local KnifeThrowSpeed = GetSetting("KnifeThrowSpeed", 175)
 local AutoShootEnabled = GetSetting("AutoShootEnabled", false)
@@ -1653,25 +1812,60 @@ local function Shoot(Target, Pos)
     end)
     
     local beam = GetBeamBindable()
+    local usedBeam = false
     if beam then
+        usedBeam = true
         pcall(function()
             beam:Fire(toolEvents.handle, Pos)
         end)
     end
     
+    local usedShowBeam = false
     if toolEvents.showBeam then
+        usedShowBeam = true
         pcall(function()
             toolEvents.showBeam:FireServer(Pos, humanoidRootPart.Position, toolEvents.handle)
         end)
     end
     
+    local killed = false
+    local remoteUsed = "KnifeKill"
     if UseGunKill then
-        GunKill(Target, Pos)
+        remoteUsed = "GunKill"
+        GunKill(Target, Pos, false) 
+        local char = Target.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        killed = not (hum and hum.Health > 0)
     else
-        KnifeKill(Target)
+        remoteUsed = "KnifeKill"
+        KnifeKill(Target, false) 
+        local char = Target.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        killed = not (hum and hum.Health > 0)
     end
     
-    return true
+    if DebugMode then
+        Rayfield:Notify({
+            Title = lang.DebugModeTitle,
+            Content = string.format("%s\n%s\n%s\n%s\n%s\n%s",
+                string.format(lang.DebugTriedShoot, Target and Target.Name or "Unknown"),
+                string.format(lang.DebugPosition, tostring(Pos)),
+                string.format(lang.DebugKilled, killed and "true" or "false"),
+                string.format(lang.DebugShootMethod, remoteUsed),
+                string.format(lang.DebugUsedBeam, usedBeam and "true" or "false"),
+                string.format(lang.DebugUsedShowBeam, usedShowBeam and "true" or "false")
+            ),
+            Duration = 3
+        })
+    elseif NotifyWhereShooted then
+        Rayfield:Notify({
+            Title = lang.ShootingNotify,
+            Content = lang.ShootPosContent .. tostring(Pos),
+            Duration = 2
+        })
+    end
+    
+    return killed
 end
 
 local function FastFireTarget(forceTarget)
@@ -1715,7 +1909,7 @@ local function FastFireTarget(forceTarget)
         return
     end
     
-    Shoot(Target, Pos)
+    Shoot(Target, Pos,false)
     lastShotTime = now
     
     if AutoUnEquipEnabled then
@@ -1797,7 +1991,7 @@ local function KillTarget(Enemy)
     if not TargetCharacter then return false end
     local TargetHumanoidRootPart = TargetCharacter:FindFirstChild("HumanoidRootPart")
     if not TargetHumanoidRootPart then return false end
-    KnifeKill(Enemy)
+    KnifeKill(Enemy,false)
     return true
 end
 
@@ -1810,7 +2004,7 @@ local function KillTargetWithGun(Enemy)
         if AutoEquipEnabled then Tool = EquipGun() if not Tool or Tool.Parent ~= LocalPlayer.Character then return false end
         else return false end
     end
-    Shoot(Enemy, Pos)
+    Shoot(Enemy, Pos,false)
     if AutoUnEquipEnabled and not Eq then
         task.delay(0.008, function()
             if CurrentGun and CurrentGun.Parent == LocalPlayer.Character then UnequipGun() end
@@ -2109,6 +2303,21 @@ end)
 
 local AimTab = Window:CreateTab(lang.AimAssistTab)
 AimTab:CreateLabel(lang.SettingsLabel)
+AimTab:CreateToggle({
+    Name = lang.DebugMode,
+    CurrentValue = DebugMode,
+    Callback = function(Value)
+        DebugMode = Value
+        UpdateSetting("DebugMode", Value)
+        if Value then
+            Rayfield:Notify({
+                Title = "Debug Mode",
+                Content = "Debug Mode Enabled - Notifications replaced with debug info",
+                Duration = 2
+            })
+        end
+    end
+})
 AimTab:CreateInput({
     Name = lang.AimDistance,
     PlaceholderText = "1 - inf",
@@ -2341,7 +2550,7 @@ local function FastFireGunAll()
             if gun then
                 local pos = GetPredictedPosition(plr)
                 if pos then
-                    Shoot(plr, pos)
+                    Shoot(plr, pos, true)
                     task.wait(0.001)
                 end
             end
@@ -2805,6 +3014,12 @@ LocalPlayer.CharacterAdded:Connect(function()
     CurrentKnife = nil
 end)
 
+LocalPlayer.CharacterAdded:Connect(function()
+    if AutoGiveFakeLagEnabled then task.wait(0.5) GiveFakeLag() end
+    CurrentGun = nil
+    CurrentKnife = nil
+end)
+
 RunService.Heartbeat:Connect(function()
     if AutoShootEnabled then FastFireTarget(nil) end
     if autoThrow then FastThrowKnife() end
@@ -2867,12 +3082,25 @@ if IsTouchDevice then
         Duration = 5
     })
 end
+
+wordsToConvert.English["AutoJoin4v4"] = "Auto go to 4v4"
+wordsToConvert.English["Button4v4"] = "Join 4v4"
+wordsToConvert.Spanish["AutoJoin4v4"] = "Auto ir a 4v4"
+wordsToConvert.Spanish["Button4v4"] = "Unirse a 4v4"
+wordsToConvert.German["AutoJoin4v4"] = "Auto zu 4v4"
+wordsToConvert.German["Button4v4"] = "4v4 beitreten"
+wordsToConvert.French["AutoJoin4v4"] = "Auto aller en 4v4"
+wordsToConvert.French["Button4v4"] = "Rejoindre 4v4"
+wordsToConvert.Portuguese["AutoJoin4v4"] = "Auto ir para 4v4"
+wordsToConvert.Portuguese["Button4v4"] = "Entrar 4v4"
+
 local AutoFarmTab = Window:CreateTab(lang.AutoFarmTab)
 AutoFarmTab:CreateLabel(lang.AutoFarmLabel)
 
 local AutoJoin1v1 = GetSetting("AutoJoin1v1", false)
 local AutoJoin2v2 = GetSetting("AutoJoin2v2", false)
 local AutoJoin3v3 = GetSetting("AutoJoin3v3", false)
+local AutoJoin4v4 = GetSetting("AutoJoin4v4", false)  
 
 local function IsInMatch()
     return #GetEnemyNamesFromFrames() > 0
@@ -2902,7 +3130,10 @@ AutoFarmTab:CreateButton({
     Name = lang.Button3v3,
     Callback = function() JoinGameWithRemote("3v3") end
 })
-
+AutoFarmTab:CreateButton({
+    Name = lang.Button4v4,
+    Callback = function() JoinGameWithRemote("4v4") end
+})
 AutoFarmTab:CreateLabel("--- Auto Join ---")
 
 AutoFarmTab:CreateToggle({
@@ -2921,6 +3152,11 @@ AutoFarmTab:CreateToggle({
     Name = lang.AutoJoin3v3,
     CurrentValue = AutoJoin3v3,
     Callback = function(v) AutoJoin3v3 = v UpdateSetting("AutoJoin3v3", v) end
+})
+AutoFarmTab:CreateToggle({
+    Name = lang.AutoJoin4v4,
+    CurrentValue = AutoJoin4v4,
+    Callback = function(v) AutoJoin4v4 = v UpdateSetting("AutoJoin4v4", v) end
 })
 
 local targetDate = os.time({
