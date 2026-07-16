@@ -1,4 +1,5 @@
--- B3tterDex 3.0 - The Cutest,Open Source,Fast and Fast Updates,Clean and User friendly Murderers Vs Sheriffs Script [UwU]
+-- Im so sorry for making this script unusable,i wont do any changes again
+-- B3tterDex 3.1 - The Cutest,Open Source,Fast and Fast Updates,Clean and User friendly Murderers Vs Sheriffs Script [UwU]
 -- B3tterDex by @Sty! & @mrholvis
 --[[
  A little of history...
@@ -3513,15 +3514,15 @@ if autoJoinEnabled then
             UpdateSetting("AutoExecuteEnabled", true)
             setupAutoExecute()
         end
-        while autoJoinEnabled do
-            if not IsInMatch() then
-                JoinGameWithRemote(selectedMode)
-            end
-            task.wait(0.4)
+        task.spawn(function()
+    while autoJoinEnabled do
+        if not IsInMatch() then
+            local currentMode = selectedMode
+            JoinGameWithRemote(currentMode)
         end
-    end)
-end
-
+        task.wait(0.4)
+    end
+end)
 if autoKillEnabled and autoJoinEnabled then
     task.spawn(function()
         local enemies = GetEnemyPlayers()
