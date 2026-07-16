@@ -1,4 +1,4 @@
--- B3tterDex 3.1 - The Cutest,Open Source,Fast and Fast Updates,Clean and User friendly Murderers Vs Sheriffs Script [UwU]
+-- B3tterDex 3.0 - The Cutest,Open Source,Fast and Fast Updates,Clean and User friendly Murderers Vs Sheriffs Script [UwU]
 -- B3tterDex by @Sty! & @mrholvis
 --[[
  A little of history...
@@ -3310,10 +3310,20 @@ wordsToConvert.Portuguese["AutoExecuteError"] = "queue_on_teleport não está di
 wordsToConvert.Portuguese["ErrorTitle"] = "Erro"
 
 local function IsInMatch()
-    local myTeam = GetLocalTeam()
-    if not myTeam then return false end
-    local enemies = GetEnemyPlayers()
-    return #enemies > 0
+    local myGame = GetLocalGame()
+    if not myGame then
+        return false
+    end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer
+            and player:GetAttribute("Game") == myGame
+            and player:GetAttribute("Team") then
+            return true
+        end
+    end
+
+    return false
 end
 
 local function JoinGameWithRemote(mode)
@@ -3503,15 +3513,15 @@ if autoJoinEnabled then
             UpdateSetting("AutoExecuteEnabled", true)
             setupAutoExecute()
         end
-        task.spawn(function()
-    while autoJoinEnabled do
-        if not IsInMatch() then
-            local currentMode = selectedMode
-            JoinGameWithRemote(currentMode)
+        while autoJoinEnabled do
+            if not IsInMatch() then
+                JoinGameWithRemote(selectedMode)
+            end
+            task.wait(0.4)
         end
-        task.wait(0.4)
-    end
-end)
+    end)
+end
+
 if autoKillEnabled and autoJoinEnabled then
     task.spawn(function()
         local enemies = GetEnemyPlayers()
