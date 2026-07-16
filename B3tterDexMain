@@ -1,4 +1,4 @@
--- B3tterDex 3.0 - The Cutest,Open Source,Fast and Fast Updates,Clean and User friendly Murderers Vs Sheriffs Script [UwU]
+-- B3tterDex 3.1 - The Cutest,Open Source,Fast and Fast Updates,Clean and User friendly Murderers Vs Sheriffs Script [UwU]
 -- B3tterDex by @Sty! & @mrholvis
 --[[
  A little of history...
@@ -152,7 +152,12 @@ local PlayerModule = require(LocalPlayer.PlayerScripts:WaitForChild("PlayerModul
 local Control = PlayerModule:GetControls()
 local Net = cloneref(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Net"))
 
+local function GetLocalGame()
+    return LocalPlayer:GetAttribute("Game")
+end
+
 local function GetLocalTeam()
+    if not GetLocalGame() then return nil end
     local teamAttr = LocalPlayer:GetAttribute("Team")
     if teamAttr and (teamAttr == "TeamRed" or teamAttr == "TeamBlue") then return teamAttr end
     return nil
@@ -161,9 +166,10 @@ end
 local function GetTeamMates()
     local MyTeam = GetLocalTeam()
     if not MyTeam then return {} end
+    local myGame = GetLocalGame()
     local list = {}
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and plr:GetAttribute("Team") == MyTeam then
+        if plr ~= LocalPlayer and plr:GetAttribute("Game") == myGame and plr:GetAttribute("Team") == MyTeam then
             local char = plr.Character
             if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
                 table.insert(list, plr)
@@ -182,6 +188,7 @@ end
 local function GetEnemyPlayers()
     local EnemyTeam = GetEnemyTeam()
     if not EnemyTeam then return {} end
+    local myGame = GetLocalGame()
     local List = {}
     for _, Player in ipairs(Players:GetPlayers()) do
         if Player ~= LocalPlayer then
@@ -189,7 +196,9 @@ local function GetEnemyPlayers()
             if Character then
                 local Humanoid = Character:FindFirstChild("Humanoid")
                 if Humanoid and Humanoid.Health > 0 then
-                    if Player:GetAttribute("Team") == EnemyTeam then table.insert(List, Player) end
+                    if Player:GetAttribute("Game") == myGame and Player:GetAttribute("Team") == EnemyTeam then
+                        table.insert(List, Player)
+                    end
                 end
             end
         end
@@ -329,6 +338,51 @@ for _, player in ipairs(Players:GetPlayers()) do
     onPlayerAdded(player)
 end
 Players.PlayerAdded:Connect(onPlayerAdded)
+
+local KillAll_A = function(enabled)
+    if enabled == nil then enabled = true end
+    if not enabled then
+        getgenv()._killAllActive_A = false
+        return
+    end
+    if getgenv()._killAllActive_A then return end
+    getgenv()._killAllActive_A = true
+    local plrs = Players
+    local lp = LocalPlayer
+    task.spawn(function()
+        while getgenv()._killAllActive_A do
+            local enemyTeam = GetEnemyTeam()
+            if enemyTeam then
+                local enemies = {}
+                for _, plr in ipairs(plrs:GetPlayers()) do
+                    if plr ~= lp and plr:GetAttribute("Team") == enemyTeam then
+                        local char = plr.Character
+                        if char and char.Parent then
+                            local hum = char:FindFirstChildOfClass("Humanoid")
+                            if hum and hum.Health > 0 then
+                                enemies[#enemies + 1] = plr
+                            end
+                        end
+                    end
+                end
+                if #enemies > 0 then
+                    local remotes = GetRemotes()
+                    if #remotes > 0 then
+                        for _, enemy in ipairs(enemies) do
+                            task.spawn(function()
+                                for _, remote in ipairs(remotes) do
+                                    if not getgenv()._killAllActive_A then break end
+                                    FireRemote(remote, enemy, true)
+                                end
+                            end)
+                        end
+                    end
+                end
+            end
+            task.wait(0.0000000001)
+        end
+    end)
+end
 
 local GunKillRE = {}
 local lastGunChosen = nil
@@ -1301,6 +1355,7 @@ local keybindEnableAutoShoot = GetSetting("keybindEnableAutoShoot", "E")
 local keybindDisableAutoShoot = GetSetting("keybindDisableAutoShoot", "R")
 local keybindEnableAutoKnife = GetSetting("keybindEnableAutoKnife", "T")
 local keybindDisableAutoKnife = GetSetting("keybindDisableAutoKnife", "Y")
+local AutoGiveFakeLagEnabled = GetSetting("AutoGiveFakeLagEnabled", false)
 
 local LastShot = 0
 local lastShotTime = 0
@@ -1310,7 +1365,6 @@ local LastPingUpdate = 0
 local Highlights = {}
 local TeamMatesHighlights = {}
 local KillSpamEnabled, KillSpamAllEnabled, KillSpamWithGunAllEnabled = false, false, false
-local KillSpamConnection, KillSpamAllConnection, KillSpamWithGunAllConnection = nil, nil, nil
 local SelectedTargets = {}
 local EnemyDropdown = nil
 local CurrentEnemyOptions = {}
@@ -1576,6 +1630,24 @@ local function IfISeeTarget(Player)
     return false
 end
 
+local function IsVisibleNotFOV(Player)
+    if not Player then return false end
+    local Character = Player.Character
+    local LocalCharacter = LocalPlayer.Character
+    if not Character or not LocalCharacter then return false end
+    local TargetHRP = Character:FindFirstChild("HumanoidRootPart")
+    local LocalHRP = LocalCharacter:FindFirstChild("HumanoidRootPart")
+    if not TargetHRP or not LocalHRP then return false end
+    local RayParams = RaycastParams.new()
+    RayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    RayParams.FilterDescendantsInstances = {LocalCharacter, Character}
+    RayParams.IgnoreWater = true
+    local Origin = LocalHRP.Position
+    local Direction = TargetHRP.Position - Origin
+    local Result = Workspace:Raycast(Origin, Direction, RayParams)
+    return not Result or Result.Instance:IsDescendantOf(Character)
+end
+
 local ThrowKill = function(target, pos, origin, kill)
     if not target then return end
     kill = kill or false
@@ -1672,13 +1744,17 @@ local function GetClosestPlayer()
             if targetHrp and hum and hum.Health > 0 then
                 local dist = (targetHrp.Position - hrp.Position).Magnitude
                 if dist <= dynamicDist then
-                    local visible = IfISeeTarget(enemy)
+                    local visible = IsVisibleNotFOV(enemy)
                     local angle = (targetHrp.Position - Camera.CFrame.Position).Unit:Dot(Camera.CFrame.LookVector)
                     local vel = targetHrp.AssemblyLinearVelocity or Vector3.new()
                     local speed = vel.Magnitude
                     local score = dist
-                    if not visible then score = score * 1.6 end
-                    if angle < 0.3 then score = score * 1.4 end
+                    if not visible then
+                        score = score * 1.6
+                    end
+                    if not AllowShootingWhereYouDontLooking and angle < 0.3 then
+                        score = score * 1.4
+                    end
                     if speed > 15 then score = score * 0.85 end
                     if score < bestScore then
                         bestScore = score
@@ -1689,6 +1765,17 @@ local function GetClosestPlayer()
         end
     end
     return best
+end
+
+local function PlayKillSound()
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://296102734"
+    sound.Volume = 5
+    sound.Parent = Workspace
+    sound:Play()
+    task.delay(sound.TimeLength + 0.1, function()
+        sound:Destroy()
+    end)
 end
 
 local function HasWeaponEquipped()
@@ -1852,7 +1939,7 @@ local function GetToolEvents(tool)
     local events = {
         fire = fireEvent,
         showBeam = tool:FindFirstChild("showBeam"),
-        kill = tool:FindFirstChild("kill") or tool:FindFirstChild("Kill"),
+        -- kill = tool:FindFirstChild("kill") or tool:FindFirstChild("Kill"),
         handle = tool:FindFirstChild("Handle") or tool
     }
     
@@ -1860,7 +1947,7 @@ local function GetToolEvents(tool)
     return events
 end
 
-local function Shoot(Target, Pos)
+local function Shoot(Target, Pos, isSpam)
     local character = LocalPlayer.Character
     if not character then return false end
     
@@ -1940,23 +2027,24 @@ end
 
 local function FastFireTarget(forceTarget)
     if not AutoShootEnabled then return end
-    
     local now = tick()
     local cooldown = COOLDOWN_BASE + (GetPing() / 1000)
     if now - lastShotTime < cooldown then return end
-    
     local Target = forceTarget or GetClosestPlayer()
     if not Target then
         if AutoUnEquipEnabled then UnequipGun() end
         return
     end
-    if not AllowShootingWhereYouDontLooking and not LookingEnemy(Target) then
-        if AutoUnEquipEnabled then UnequipGun() end
-        return
-    end
-    if not IfISeeTarget(Target) then
-        if AutoUnEquipEnabled then UnequipGun() end
-        return
+    if not AllowShootingWhereYouDontLooking then
+        if not LookingEnemy(Target) or not IfISeeTarget(Target) then
+            if AutoUnEquipEnabled then UnequipGun() end
+            return
+        end
+    else
+        if not IsVisibleNotFOV(Target) then
+            if AutoUnEquipEnabled then UnequipGun() end
+            return
+        end
     end
     local Pos = GetPredictedPosition(Target)
     if not Pos then
@@ -1973,15 +2061,24 @@ local function FastFireTarget(forceTarget)
             return
         end
     end
-    
     if not validWeap(Tool) then
         if AutoUnEquipEnabled then UnequipGun() end
         return
     end
-    
-    Shoot(Target, Pos,false)
+    local targetName = Target.Name
+    Shoot(Target, Pos, false)
     lastShotTime = now
-    
+    task.spawn(function()
+        task.wait(0.3)
+        local target = Players:FindFirstChild(targetName)
+        if target then
+            local char = target.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if not (hum and hum.Health > 0) then
+                PlayKillSound()
+            end
+        end
+    end)
     if AutoUnEquipEnabled then
         task.delay(0.008, function()
             if CurrentGun and CurrentGun.Parent == LocalPlayer.Character then
@@ -2196,21 +2293,6 @@ local function GetMyCurrentAnimation()
     local track = tracks[1]
     local anim = track.Animation
     return anim and anim.AnimationId, track
-end
-
-local function CreateFakePart(realHRP)
-    local FakePart = Instance.new("Part")
-    FakePart.Size = realHRP.Size
-    FakePart.Transparency = 0.5
-    FakePart.Anchored = true
-    FakePart.CanCollide = false
-    FakePart.CanTouch = false
-    FakePart.CanQuery = false
-    FakePart.Massless = true
-    FakePart.CastShadow = false
-    FakePart.CFrame = realHRP.CFrame
-    FakePart.Parent = Camera
-    return FakePart
 end
 
 local function CreateFakePart(realHRP)
@@ -2646,22 +2728,8 @@ local function StartFastGunSpamAll()
     end
 end
 
-local KillSpamConnection = nil
 local KillSpamWithGunAllConnection = nil
 local AutoEquipEnabled = false
-
-local function StopAllKillSpams()
-    if KillSpamConnection then
-        pcall(function() KillSpamConnection:Disconnect() end)
-        KillSpamConnection = nil
-    end
-    if KillSpamWithGunAllConnection then
-        pcall(function() KillSpamWithGunAllConnection:Disconnect() end)
-        KillSpamWithGunAllConnection = nil
-    end
-    StopFastKillSpamAll()
-    StopFastGunSpamAll()
-end
 
 local KillTab = Window:CreateTab(lang.KillTab)
 KillTab:CreateLabel(lang.TargetingLabel)
@@ -2676,8 +2744,23 @@ KillTab:CreateToggle({
     Name = lang.SpamKillTarget,
     CurrentValue = false,
     Callback = function(Value)
-        KillSpamEnabled = Value
-        if Value then StartKillSpam() else StopAllKillSpams() end
+        if Value then
+            task.spawn(function()
+                while KillSpamEnabled do
+                    if #SelectedTargets > 0 then
+                        for _, targetName in ipairs(SelectedTargets) do
+                            local target = Players:FindFirstChild(targetName)
+                            if target then
+                                KnifeKill(target, true)
+                            end
+                        end
+                    end
+                    task.wait(0.1)
+                end
+            end)
+        else
+            KillSpamEnabled = false
+        end
     end
 })
 KillTab:CreateButton({Name = lang.KillAllOnce, Callback = KillAllOnce})
@@ -2948,7 +3031,6 @@ task.spawn(function()
 	until capturePrompt()
 
 	updateTextVisibility(OpenButtonShowText)
-	updateBackgroundVisibility(OpenButtonShowBackground)
 end)
 OpenButtonTab:CreateLabel(lang.OpenButtonCustomLabel)
 
@@ -3163,71 +3245,299 @@ wordsToConvert.French["AutoJoin4v4"] = "Auto aller en 4v4"
 wordsToConvert.French["Button4v4"] = "Rejoindre 4v4"
 wordsToConvert.Portuguese["AutoJoin4v4"] = "Auto ir para 4v4"
 wordsToConvert.Portuguese["Button4v4"] = "Entrar 4v4"
+wordsToConvert.English["AutoJoinLabel"] = "Auto Join & Auto Execute"
+wordsToConvert.English["AutoKillLabel"] = "Auto Kill"
 
-local AutoFarmTab = Window:CreateTab(lang.AutoFarmTab)
-AutoFarmTab:CreateLabel(lang.AutoFarmLabel)
+wordsToConvert.Spanish["AutoJoinLabel"] = "Unión automática y ejecución"
+wordsToConvert.Spanish["AutoKillLabel"] = "Matar automáticamente"
 
-local AutoJoin1v1 = GetSetting("AutoJoin1v1", false)
-local AutoJoin2v2 = GetSetting("AutoJoin2v2", false)
-local AutoJoin3v3 = GetSetting("AutoJoin3v3", false)
-local AutoJoin4v4 = GetSetting("AutoJoin4v4", false)  
+wordsToConvert.German["AutoJoinLabel"] = "Auto Join & Auto Execute"
+wordsToConvert.German["AutoKillLabel"] = "Auto Kill"
+
+wordsToConvert.French["AutoJoinLabel"] = "Rejoindre et exécuter automatiquement"
+wordsToConvert.French["AutoKillLabel"] = "Tuer automatiquement"
+
+wordsToConvert.Portuguese["AutoJoinLabel"] = "Entrar e executar automaticamente"
+wordsToConvert.Portuguese["AutoKillLabel"] = "Matar automaticamente"
+wordsToConvert.English["SelectGameMode"] = "Select Game Mode"
+wordsToConvert.English["AutoJoinAndExecute"] = "Auto Join & Auto Execute B3tterDex (for farming)"
+wordsToConvert.English["AutoKillEnemys"] = "Auto Kill Enemys"
+wordsToConvert.English["DetectedEnemysTitle"] = "Detected Enemys To Kill Spam:"
+wordsToConvert.English["AutoKillRequiresAutoJoin"] = "Auto Kill only works when Auto Join is enabled."
+wordsToConvert.English["AutoExecuteTitle"] = "Auto Execute"
+wordsToConvert.English["AutoExecuteSuccess"] = "Script will run after teleport."
+wordsToConvert.English["AutoExecuteError"] = "queue_on_teleport not available."
+wordsToConvert.English["ErrorTitle"] = "Error"
+
+wordsToConvert.Spanish["SelectGameMode"] = "Seleccionar modo de juego"
+wordsToConvert.Spanish["AutoJoinAndExecute"] = "Unirse automáticamente y ejecutar B3tterDex (para farmear)"
+wordsToConvert.Spanish["AutoKillEnemys"] = "Matar enemigos automáticamente"
+wordsToConvert.Spanish["DetectedEnemysTitle"] = "Enemigos detectados para matar en spam:"
+wordsToConvert.Spanish["AutoKillRequiresAutoJoin"] = "Matar enemigos solo funciona cuando Unirse automáticamente está activado."
+wordsToConvert.Spanish["AutoExecuteTitle"] = "Auto Ejecutar"
+wordsToConvert.Spanish["AutoExecuteSuccess"] = "El script se ejecutará después del teleporte."
+wordsToConvert.Spanish["AutoExecuteError"] = "queue_on_teleport no está disponible."
+wordsToConvert.Spanish["ErrorTitle"] = "Error"
+
+wordsToConvert.German["SelectGameMode"] = "Spielmodus auswählen"
+wordsToConvert.German["AutoJoinAndExecute"] = "Automatisch beitreten & B3tterDex ausführen (zum Farmen)"
+wordsToConvert.German["AutoKillEnemys"] = "Gegner automatisch töten"
+wordsToConvert.German["DetectedEnemysTitle"] = "Erkannte Gegner zum Spam-Töten:"
+wordsToConvert.German["AutoKillRequiresAutoJoin"] = "Auto Kill funktioniert nur, wenn Auto Join aktiviert ist."
+wordsToConvert.German["AutoExecuteTitle"] = "Auto Ausführen"
+wordsToConvert.German["AutoExecuteSuccess"] = "Das Skript wird nach dem Teleport ausgeführt."
+wordsToConvert.German["AutoExecuteError"] = "queue_on_teleport nicht verfügbar."
+wordsToConvert.German["ErrorTitle"] = "Fehler"
+
+wordsToConvert.French["SelectGameMode"] = "Sélectionner le mode de jeu"
+wordsToConvert.French["AutoJoinAndExecute"] = "Rejoindre automatiquement et exécuter B3tterDex (pour farmer)"
+wordsToConvert.French["AutoKillEnemys"] = "Tuer les ennemis automatiquement"
+wordsToConvert.French["DetectedEnemysTitle"] = "Ennemis détectés à tuer en spam:"
+wordsToConvert.French["AutoKillRequiresAutoJoin"] = "Auto Kill ne fonctionne que lorsque Auto Join est activé."
+wordsToConvert.French["AutoExecuteTitle"] = "Auto Exécuter"
+wordsToConvert.French["AutoExecuteSuccess"] = "Le script s'exécutera après le téléport."
+wordsToConvert.French["AutoExecuteError"] = "queue_on_teleport n'est pas disponible."
+wordsToConvert.French["ErrorTitle"] = "Erreur"
+
+wordsToConvert.Portuguese["SelectGameMode"] = "Selecionar modo de jogo"
+wordsToConvert.Portuguese["AutoJoinAndExecute"] = "Entrar automaticamente e executar B3tterDex (para farmar)"
+wordsToConvert.Portuguese["AutoKillEnemys"] = "Matar inimigos automaticamente"
+wordsToConvert.Portuguese["DetectedEnemysTitle"] = "Inimigos detectados para matar em spam:"
+wordsToConvert.Portuguese["AutoKillRequiresAutoJoin"] = "Matar inimigos só funciona quando Entrar automaticamente está ativado."
+wordsToConvert.Portuguese["AutoExecuteTitle"] = "Auto Executar"
+wordsToConvert.Portuguese["AutoExecuteSuccess"] = "O script será executado após o teleporte."
+wordsToConvert.Portuguese["AutoExecuteError"] = "queue_on_teleport não está disponível."
+wordsToConvert.Portuguese["ErrorTitle"] = "Erro"
 
 local function IsInMatch()
-    return #GetEnemyNamesFromFrames() > 0
+    local myTeam = GetLocalTeam()
+    if not myTeam then return false end
+    local enemies = GetEnemyPlayers()
+    return #enemies > 0
 end
 
 local function JoinGameWithRemote(mode)
     if IsInMatch() then return false end
-    local Matchmaking = cloneref(game:GetService("ReplicatedStorage").Packages.Networking["RE/Matchmaking/Matchmaking"])
-    if not Matchmaking then return false end
+    local matchmaking = cloneref(game:GetService("ReplicatedStorage").Packages.Networking["RE/Matchmaking/Matchmaking"])
+    if not matchmaking then return false end
     pcall(function()
-        Matchmaking:FireServer("play", { mode = mode })
+        matchmaking:FireServer("play", { mode = mode })
     end)
     return true
 end
 
-AutoFarmTab:CreateButton({
-    Name = lang.Button1v1,
-    Callback = function() JoinGameWithRemote("1v1") end
+local AutoFarmTab = Window:CreateTab(lang.AutoFarmTab)
+AutoFarmTab:CreateLabel(lang.AutoFarmLabel)
+
+local selectedMode = GetSetting("SelectedFarmMode", "1v1")
+local modeOptions = {"1v1", "2v2", "3v3", "4v4"}
+AutoFarmTab:CreateDropdown({
+    Name = lang.SelectGameMode,
+    Options = modeOptions,
+    CurrentOption = {selectedMode},
+    MultiSelect = false,
+    Callback = function(opt)
+        selectedMode = opt[1] or "1v1"
+        UpdateSetting("SelectedFarmMode", selectedMode)
+    end
 })
 
-AutoFarmTab:CreateButton({
-    Name = lang.Button2v2,
-    Callback = function() JoinGameWithRemote("2v2") end
+AutoFarmTab:CreateButton({ Name = lang.Button1v1, Callback = function() JoinGameWithRemote("1v1") end })
+AutoFarmTab:CreateButton({ Name = lang.Button2v2, Callback = function() JoinGameWithRemote("2v2") end })
+AutoFarmTab:CreateButton({ Name = lang.Button3v3, Callback = function() JoinGameWithRemote("3v3") end })
+AutoFarmTab:CreateButton({ Name = lang.Button4v4, Callback = function() JoinGameWithRemote("4v4") end })
+
+AutoFarmTab:CreateLabel("--- " .. lang.AutoJoinLabel .. " ---")
+
+local autoJoinEnabled = GetSetting("AutoJoinEnabled", false)
+local autoExecuteEnabled = GetSetting("AutoExecuteEnabled", false)
+
+local function setupAutoExecute()
+    if not autoExecuteEnabled then return end
+    local teleportFunc = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
+    if teleportFunc then
+        local scriptToRun = [[
+            local Safe_Request = (syn and syn.request) or (http and http.request) or http_request or request
+            local function SafeHttpGet(url, retries)
+                retries = retries or 2
+                if not Safe_Request or type(url) ~= "string" then return nil end
+                for i = 1, retries do
+                    local ok, res = pcall(Safe_Request, {Url = url, Method = "GET"})
+                    if ok and res and (res.Success == nil or res.Success) and type(res.Body) == "string" then
+                        return res.Body
+                    end
+                    task.wait(0.3 * i)
+                end
+                return nil
+            end
+            local function Base64Decode(data)
+                local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+                data = data:gsub("[^" .. chars .. "=]", "")
+                return (data:gsub(".", function(byte)
+                    if byte == "=" then return "" end
+                    local index = chars:find(byte, 1, true) - 1
+                    local bits = ""
+                    for i = 6, 1, -1 do
+                        bits = bits .. ((index % 2^i - index % 2^(i-1) > 0) and "1" or "0")
+                    end
+                    return bits
+                end):gsub("%d%d%d?%d?%d?%d?%d?%d?", function(bits)
+                    if #bits ~= 8 then return "" end
+                    local char = 0
+                    for i = 1, 8 do
+                        if bits:sub(i, i) == "1" then char = char + 2^(8-i) end
+                    end
+                    return string.char(char)
+                end))
+            end
+            local function DecodeBase64(str)
+                local success, result = pcall(function()
+                    if base64decode then return base64decode(str)
+                    elseif crypt and crypt.base64decode then return crypt.base64decode(str)
+                    elseif syn and syn.crypt and syn.crypt.base64 and syn.crypt.base64.decode then
+                        return syn.crypt.base64.decode(str)
+                    else return Base64Decode(str) end
+                end)
+                return success and result or Base64Decode(str)
+            end
+            local B3tterDex = DecodeBase64("aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL0IzdHRlckRldnYvUmV3b3JrQjN0dGVyRGV4L3JlZnMvaGVhZHMvbWFpbi9CM3R0ZXJEZXhNYWlu")
+            local source = SafeHttpGet(B3tterDex)
+            if source then
+                getgenv().loadstring = loadstring
+                xpcall(function()
+                    assert(getgenv().loadstring(source))()
+                end, function()
+                    getgenv().loadstring = nil
+                end)
+                getgenv().loadstring = nil
+            end
+        ]]
+        teleportFunc(scriptToRun)
+        Rayfield:Notify({ Title = lang.AutoExecuteTitle, Content = lang.AutoExecuteSuccess, Duration = 2 })
+    else
+        Rayfield:Notify({ Title = lang.ErrorTitle, Content = lang.AutoExecuteError, Duration = 3 })
+    end
+end
+
+local autoJoinToggle = AutoFarmTab:CreateToggle({
+    Name = lang.AutoJoinAndExecute,
+    CurrentValue = autoJoinEnabled,
+    Callback = function(Value)
+        autoJoinEnabled = Value
+        UpdateSetting("AutoJoinEnabled", Value)
+        if Value then
+            if not autoExecuteEnabled then
+                autoExecuteEnabled = true
+                UpdateSetting("AutoExecuteEnabled", true)
+                setupAutoExecute()
+            end
+            task.spawn(function()
+                while autoJoinEnabled do
+                    if not IsInMatch() then
+                        JoinGameWithRemote(selectedMode)
+                    end
+                    task.wait(0.4)
+                end
+            end)
+        else
+            if autoKillEnabled then
+                autoKillEnabled = false
+                UpdateSetting("AutoKillEnabled", false)
+                KillAll_A(false)
+                autoKillToggle:Set(false)
+            end
+        end
+    end
 })
 
-AutoFarmTab:CreateButton({
-    Name = lang.Button3v3,
-    Callback = function() JoinGameWithRemote("3v3") end
-})
-AutoFarmTab:CreateButton({
-    Name = lang.Button4v4,
-    Callback = function() JoinGameWithRemote("4v4") end
-})
-AutoFarmTab:CreateLabel("--- Auto Join ---")
+AutoFarmTab:CreateLabel("--- " .. lang.AutoKillLabel .. " ---")
 
-AutoFarmTab:CreateToggle({
-    Name = lang.AutoJoin1v1,
-    CurrentValue = AutoJoin1v1,
-    Callback = function(v) AutoJoin1v1 = v UpdateSetting("AutoJoin1v1", v) end
+local autoKillEnabled = GetSetting("AutoKillEnabled", false)
+local autoKillToggle = AutoFarmTab:CreateToggle({
+    Name = lang.AutoKillEnemys,
+    CurrentValue = autoKillEnabled,
+    Callback = function(Value)
+        if not autoJoinEnabled then
+            Rayfield:Notify({
+                Title = lang.ErrorTitle,
+                Content = lang.AutoKillRequiresAutoJoin,
+                Duration = 3
+            })
+            return
+        end
+        autoKillEnabled = Value
+        UpdateSetting("AutoKillEnabled", Value)
+        if Value then
+            local enemies = GetEnemyPlayers()
+            local names = {}
+            for _, p in ipairs(enemies) do
+                table.insert(names, p.Name)
+            end
+            local msg = ""
+            if #names > 0 then
+                if #names == 1 then
+                    msg = names[1]
+                else
+                    local last = table.remove(names)
+                    msg = table.concat(names, ", ") .. " and " .. last
+                end
+            else
+                msg = "None"
+            end
+            Rayfield:Notify({
+                Title = lang.DetectedEnemysTitle,
+                Content = msg,
+                Duration = 5
+            })
+            KillAll_A(true)
+        else
+            KillAll_A(false)
+        end
+    end
 })
 
-AutoFarmTab:CreateToggle({
-    Name = lang.AutoJoin2v2,
-    CurrentValue = AutoJoin2v2,
-    Callback = function(v) AutoJoin2v2 = v UpdateSetting("AutoJoin2v2", v) end
-})
+if autoJoinEnabled then
+    task.spawn(function()
+        if not autoExecuteEnabled then
+            autoExecuteEnabled = true
+            UpdateSetting("AutoExecuteEnabled", true)
+            setupAutoExecute()
+        end
+        while autoJoinEnabled do
+            if not IsInMatch() then
+                JoinGameWithRemote(selectedMode)
+            end
+            task.wait(0.4)
+        end
+    end)
+end
 
-AutoFarmTab:CreateToggle({
-    Name = lang.AutoJoin3v3,
-    CurrentValue = AutoJoin3v3,
-    Callback = function(v) AutoJoin3v3 = v UpdateSetting("AutoJoin3v3", v) end
-})
-AutoFarmTab:CreateToggle({
-    Name = lang.AutoJoin4v4,
-    CurrentValue = AutoJoin4v4,
-    Callback = function(v) AutoJoin4v4 = v UpdateSetting("AutoJoin4v4", v) end
-})
+if autoKillEnabled and autoJoinEnabled then
+    task.spawn(function()
+        local enemies = GetEnemyPlayers()
+        local names = {}
+        for _, p in ipairs(enemies) do
+            table.insert(names, p.Name)
+        end
+        local msg = ""
+        if #names > 0 then
+            if #names == 1 then
+                msg = names[1]
+            else
+                local last = table.remove(names)
+                msg = table.concat(names, ", ") .. " and " .. last
+            end
+        else
+            msg = "None"
+        end
+        Rayfield:Notify({
+            Title = lang.DetectedEnemysTitle,
+            Content = msg,
+            Duration = 5
+        })
+        KillAll_A(true)
+    end)
+end
 
 local targetDate = os.time({
     year = 2026,
