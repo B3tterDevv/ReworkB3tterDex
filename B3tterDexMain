@@ -1,4 +1,3 @@
--- Im so sorry for making this script unusable,i wont do any changes again
 -- B3tterDex 3.1 - The Cutest,Open Source,Fast and Fast Updates,Clean and User friendly Murderers Vs Sheriffs Script [UwU]
 -- B3tterDex by @Sty! & @mrholvis
 --[[
@@ -3515,38 +3514,40 @@ if autoJoinEnabled then
             setupAutoExecute()
         end
         task.spawn(function()
-    while autoJoinEnabled do
-        if not IsInMatch() then
-            local currentMode = selectedMode
-            JoinGameWithRemote(currentMode)
-        end
-        task.wait(0.4)
-    end
-end)
-if autoKillEnabled and autoJoinEnabled then
-    task.spawn(function()
-        local enemies = GetEnemyPlayers()
-        local names = {}
-        for _, p in ipairs(enemies) do
-            table.insert(names, p.Name)
-        end
-        local msg = ""
-        if #names > 0 then
-            if #names == 1 then
-                msg = names[1]
-            else
-                local last = table.remove(names)
-                msg = table.concat(names, ", ") .. " and " .. last
+            while autoJoinEnabled do
+                if not IsInMatch() then
+                    local currentMode = selectedMode
+                    JoinGameWithRemote(currentMode)
+                end
+                task.wait(0.4)
             end
-        else
-            msg = "None"
+        end)
+        if autoKillEnabled and autoJoinEnabled then
+            task.spawn(function()
+                local enemies = GetEnemyPlayers()
+                local names = {}
+                for _, p in ipairs(enemies) do
+                    table.insert(names, p.Name)
+                end
+                local msg = ""
+                if #names > 0 then
+                    if #names == 1 then
+                        msg = names[1]
+                    else
+                        local last = table.remove(names)
+                        msg = table.concat(names, ", ") .. " and " .. last
+                    end
+                else
+                    msg = "None"
+                end
+                Rayfield:Notify({
+                    Title = lang.DetectedEnemysTitle,
+                    Content = msg,
+                    Duration = 5
+                })
+                KillAll_A(true)
+            end)
         end
-        Rayfield:Notify({
-            Title = lang.DetectedEnemysTitle,
-            Content = msg,
-            Duration = 5
-        })
-        KillAll_A(true)
     end)
 end
 
